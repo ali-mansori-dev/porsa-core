@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlmodel
+asyncpg
+alembic
+pydantic-settings
+openai
+httpx
+slowapi
