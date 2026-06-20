@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.crud.conversation import count_conversations_by_business, count_messages_by_business
+from app.crud.usage import get_usage_totals_by_business
 from app.database import get_db
 from app.dependencies import require_admin
 from app.models import Business, Conversation, Message
@@ -40,10 +41,13 @@ async def business_stats(business_id: uuid.UUID, db: AsyncSession = Depends(get_
         )
     ).one()
 
+    token_usage = await get_usage_totals_by_business(db, business_id)
+
     return {
         "business_id": str(business_id),
         "total_conversations": total_conversations,
         "total_messages": total_messages,
         "user_messages": user_messages,
         "ai_responses": total_messages - user_messages,
+        "token_usage": token_usage,
     }

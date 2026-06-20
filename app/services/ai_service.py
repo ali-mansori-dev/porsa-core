@@ -13,6 +13,7 @@ from app.crud.conversation import (
 )
 from app.crud.escalation import create_escalation
 from app.crud.faq import get_faq
+from app.crud.usage import record_token_usage
 from app.models import MessageRole
 from app.services.business_service import NEED_HUMAN_MARKER, get_system_prompt
 from app.services.sms_service import send_message
@@ -35,6 +36,24 @@ client = AsyncOpenAI(
 )
 
 
+def _system_message(content: str) -> dict:
+    """Build the system message, marking it for provider-side prompt caching when
+    enabled. The array-of-blocks form with `cache_control` is the OpenRouter/
+    Anthropic convention; providers that don't support caching ignore it."""
+    if settings.enable_prompt_caching:
+        return {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    return {"role": "system", "content": content}
+
+
 async def chat_with_ai(
     db: AsyncSession, message: str, session_id: str, business_id: uuid.UUID
 ) -> str:
@@ -47,18 +66,23 @@ async def chat_with_ai(
     conversation = await get_or_create_conversation(db, session_id, business_id)
     history = await get_conversation_history(db, session_id, business_id)
 
-    messages: list[dict] = []
+    # The system prompt is rebuilt from the business profile + FAQ on every turn
+    # (so edits take effect immediately) and is the stable, cacheable prefix.
+    system_prompt = get_system_prompt(business, details, faq)
+    messages: list[dict] = [_system_message(system_prompt)]
 
     if not history:
-        system_prompt = get_system_prompt(business, details, faq)
-        messages.append({"role": "system", "content": system_prompt})
+        # First turn: persist the system prompt for the record and greet the user.
         await save_message(db, conversation.id, MessageRole.SYSTEM, system_prompt)
-
         if business.welcome_message:
             messages.append({"role": "assistant", "content": business.welcome_message})
             await save_message(db, conversation.id, MessageRole.ASSISTANT, business.welcome_message)
     else:
-        messages = [{"role": msg.role.value, "content": msg.content} for msg in history]
+        # Resend only the most recent dialog turns. The system prompt is supplied
+        # fresh above, so stored SYSTEM rows are skipped to avoid duplication.
+        dialog = [m for m in history if m.role != MessageRole.SYSTEM]
+        recent = dialog[-settings.history_window:] if settings.history_window > 0 else dialog
+        messages += [{"role": m.role.value, "content": m.content} for m in recent]
 
     messages.append({"role": "user", "content": message})
     await save_message(db, conversation.id, MessageRole.USER, message)
@@ -68,6 +92,8 @@ async def chat_with_ai(
         messages=messages,
         max_tokens=business.max_tokens,
     )
+
+    await _record_usage(db, response, business_id, conversation.id)
 
     assistant_message = response.choices[0].message.content or ""
 
@@ -81,6 +107,46 @@ async def chat_with_ai(
 
     await save_message(db, conversation.id, MessageRole.ASSISTANT, assistant_message)
     return assistant_message
+
+
+async def _record_usage(db, response, business_id, conversation_id) -> None:
+    """Log and persist the token usage OpenRouter returns. Best-effort: the usage
+    object's shape varies by provider, and a bookkeeping failure must never break
+    the customer's chat."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            logger.warning("No usage returned for business %s", business_id)
+            return
+
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        total_tokens = getattr(usage, "total_tokens", 0) or 0
+
+        # Cached-prompt tokens, when the provider reports them (OpenAI-style).
+        cached_tokens = 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details is not None:
+            cached_tokens = getattr(details, "cached_tokens", 0) or 0
+
+        logger.info(
+            "LLM usage business=%s model=%s prompt=%s completion=%s total=%s cached=%s",
+            business_id, settings.ai_model, prompt_tokens, completion_tokens,
+            total_tokens, cached_tokens,
+        )
+
+        await record_token_usage(
+            db,
+            business_id=business_id,
+            conversation_id=conversation_id,
+            model=settings.ai_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
+        )
+    except Exception:  # noqa: BLE001 — usage logging must not break chat
+        logger.exception("Failed to record token usage for business %s", business_id)
 
 
 async def _notify_owner(business, question: str) -> None:

@@ -179,6 +179,27 @@ class Escalation(SQLModel, table=True):
     answered_at: Optional[datetime] = None
 
 
+class TokenUsage(SQLModel, table=True):
+    """One row per LLM completion call, recording the token counts OpenRouter
+    returns in ``response.usage``. Enables per-business cost/usage reporting and
+    billing. ``cached_tokens`` is the cached-prompt portion when the provider
+    reports it (prompt caching), and is 0/None otherwise."""
+
+    __tablename__ = "token_usage"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    business_id: uuid.UUID = Field(foreign_key="businesses.id", index=True)
+    conversation_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="conversations.id", index=True
+    )
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class AuthSession(SQLModel, table=True):
     """A server-side bearer token. Opaque (``secrets.token_urlsafe``), stored so
     it can be revoked, and resolved to a User on each authenticated request."""

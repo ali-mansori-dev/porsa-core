@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     admin_api_key: str = "change-me-in-production"
     cors_origins: str = "*"
 
+    # Token-cost controls for the LLM call.
+    # How many of the most recent dialog messages (user/assistant, excluding the
+    # system prompt) to resend on each turn. Older turns are dropped so the prompt
+    # doesn't grow unbounded as a conversation gets long.
+    history_window: int = 10
+    # Mark the (stable) system prompt for provider-side prompt caching. OpenRouter
+    # forwards `cache_control` to providers that support it (e.g. Anthropic) and
+    # ignores it otherwise, so this is safe to leave on.
+    enable_prompt_caching: bool = True
+
     # Phone-number / OTP authentication
     otp_length: int = 5
     otp_expiry_minutes: int = 2

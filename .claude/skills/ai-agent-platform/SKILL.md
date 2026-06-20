@@ -167,6 +167,14 @@ These are real bugs that were already hit and fixed — keep them in mind:
    `UnicodeEncodeError` (cp1252). Set `PYTHONIOENCODING=utf-8` for ad-hoc scripts; it's a
    display issue, not a data issue.
 
+## Workflow conventions
+
+- **After every change, write the commit message in English for the user.** Once you
+  finish a change (or a coherent set of changes), provide a ready-to-use Git commit
+  message in English — a concise imperative subject line plus a short body explaining
+  what changed and why. This is for the user to copy; do not run `git commit` unless
+  explicitly asked.
+
 ## Common tasks
 
 For step-by-step recipes (add an endpoint, add a model field + migration, change the

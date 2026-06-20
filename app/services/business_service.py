@@ -12,6 +12,14 @@ _STYLE_INSTRUCTIONS = {
 }
 
 
+def _compact(text: str) -> str:
+    """Strip the per-line leading indentation (and surrounding blank lines) that
+    the f-string literals carry. That whitespace is otherwise sent as input
+    tokens on every request for no benefit."""
+    lines = [line.strip() for line in text.strip().splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 def _faq_section(faq: list[FaqEntry]) -> str:
     """Render owner-defined Q&A as the agent's source of truth, plus the rule for
     escalating questions it can't answer."""
@@ -21,15 +29,13 @@ def _faq_section(faq: list[FaqEntry]) -> str:
     else:
         faq_block = "هنوز سوال متداولی توسط کسب‌وکار ثبت نشده است."
 
-    return f"""
+    return _compact(f"""
         {faq_block}
 
         قانون مهم:
         - فقط بر اساس اطلاعات بالا (مشخصات کسب‌وکار و سوال‌های متداول) جواب بده.
-        - اگر پاسخ سوال مشتری در این اطلاعات نبود، حدس نزن و چیزی از خودت نساز.
-          در آن صورت دقیقاً و فقط همین نشانه را خروجی بده: {NEED_HUMAN_MARKER}
-          (بدون هیچ متن اضافه‌ای). سوال به صاحب کسب‌وکار ارجاع داده می‌شود.
-    """
+        - اگر پاسخ سوال مشتری در این اطلاعات نبود، حدس نزن و چیزی از خودت نساز و دقیقاً و فقط همین نشانه را خروجی بده: {NEED_HUMAN_MARKER} (بدون هیچ متن اضافه‌ای). سوال به صاحب کسب‌وکار ارجاع داده می‌شود.
+    """)
 
 
 def get_system_prompt(
@@ -100,4 +106,4 @@ def get_system_prompt(
     else:
         base = f"تو دستیار پشتیبانی {business.name} هستی.\nحوزه کاری: {business.field}\nساعت کاری: {business.working_hours}\nتماس: {business.contact}\n{style}\nفقط به فارسی جواب بده."
 
-    return base + _faq_section(faq or [])
+    return _compact(base) + "\n\n" + _faq_section(faq or [])
